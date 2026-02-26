@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOISE_DRUM_COMMAND_CENTER</title>
+    <style>
+        :root { --bg: #0f0f0f; --panel: #1e1e1e; --accent: #00ffcc; --text: #d1d1d1; --step-on: #00ffcc; --step-off: #333; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 10px; font-size: 12px; }
+        
+        /* Layout Sections */
+        #master-strip { display: flex; gap: 20px; background: #222; padding: 15px; border-bottom: 2px solid #444; margin-bottom: 10px; align-items: center; }
+        .lane { background: var(--panel); border: 1px solid #333; margin-bottom: 15px; border-radius: 4px; padding: 10px; }
+        
+        /* Grid System */
+        .step-container { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-top: 10px; }
+        .step-block { background: #252525; padding: 4px; border: 1px solid #333; display: flex; flex-direction: column; gap: 4px; }
+        .step-block.playing { border-color: var(--accent); box-shadow: inset 0 0 5px var(--accent); }
+        
+        /* Controls */
+        .knob-group { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: flex-end; }
+        .control-unit { display: flex; flex-direction: column; min-width: 60px; }
+        input[type=range] { width: 100%; height: 4px; appearance: none; background: #444; accent-color: var(--accent); border-radius: 2px; }
+        input[type=range]::-webkit-slider-thumb { appearance: none; width: 8px; height: 12px; background: var(--accent); border-radius: 2px; }
+        
+        button { background: #333; color: white; border: 1px solid #555; padding: 4px 8px; cursor: pointer; font-size: 10px; }
+        button.active { background: var(--accent); color: black; border-color: white; }
+        .btn-toggle { height: 16px; width: 100%; }
+        
+        /* Labels */
+        label { font-size: 9px; color: #888; text-transform: uppercase; margin-bottom: 2px; }
+        .lane-title { font-weight: bold; color: var(--accent); margin-right: 15px; font-size: 14px; }
+        
+        /* Responsive */
+        @media (max-width: 1200px) { .step-container { grid-template-columns: repeat(8, 1fr); } }
+        @media (max-width: 600px) { .step-container { grid-template-columns: repeat(4, 1fr); } }
+    </style>
+</head>
+<body>
+
+    <div id="master-strip">
+        <span class="lane-title">MASTER</span>
+        <button id="play-btn" style="padding: 10px 20px;">START</button>
+        <button id="stop-btn" style="padding: 10px 20px;">STOP</button>
+        
+        <div class="control-unit"><label>Tempo</label><input type="range" id="m-tempo" min="20" max="300" value="120"><span id="v-tempo">120</span></div>
+        <div class="control-unit"><label>Vol</label><input type="range" id="m-vol" min="0" max="1" step="0.01" value="0.7"></div>
+        <div class="control-unit"><label>Accent Amt</label><input type="range" id="m-accent" min="1" max="2" step="0.1" value="1.4"></div>
+        
+        <div style="width:2px; height:40px; background:#444;"></div>
+        
+        <span class="lane-title" style="font-size:10px;">DELAY</span>
+        <div class="control-unit"><label>Mix</label><input type="range" id="d-mix" min="0" max="1" step="0.01" value="0.3"></div>
+        <div class="control-unit"><label>Feedback</label><input type="range" id="d-fb" min="0" max="0.95" step="0.01" value="0.4"></div>
+        <div class="control-unit">
+            <label>Time</label>
+            <select id="d-time" style="background:#333; color:white; font-size:10px;">
+                <option value="0.75">Dotted 8th</option>
+                <option value="0.5" selected>8th</option>
+                <option value="0.333">Triplet</option>
+                <option value="0.25">16th</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="lanes-container"></div>
+
+<script>
+/** DSP WIZARD: EXPANDED ENGINE **/
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterBus = audioCtx.createGain();
+const delayNode = audioCtx.createDelay(2.0);
+const delayGain = audioCtx.createGain();
+const delayFB = audioCtx.createGain();
+const delayFilter = audioCtx.createBiquadFilter();
+const delayClipper = audioCtx.createWaveShaper();
+
+// Soft-clip curve (tanh)
+const curve = new Float32Array(44100);
+for (let i = 0; i < 44100; i++) {
+    let x = (i * 2) / 44100 - 1;
+    curve[i] = Math.tanh(x);
+}
+delayClipper.curve = curve;
+
+// Delay Routing
+delayFilter.type = 'bandpass';
+delayFilter.frequency.value = 1200;
+delayFilter.Q.value = 1.0;
+
+masterBus.connect(delayNode);
+delayNode.connect(delayFilter);
+delayFilter.connect(delayClipper);
+delayClipper.connect(delayFB);
+delayFB.connect(delayNode); // Feedback loop
+delayNode.connect(delayGain);
+
+const finalOut = audioCtx.createGain();
+masterBus.connect(finalOut);
+delayGain.connect(finalOut);
+finalOut.connect(audioCtx.destination);
+
+// Noise Source
+const bufferSize = 2 * audioCtx.sampleRate;
+const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+const output = noiseBuffer.getChannelData(0);
+for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+
+// State
+let isPlaying = false;
+let tempo = 120;
+let nextStepTime = 0.0;
+const scheduleAheadTime = 0.1;
+const lanes = [];
+
+function createLane(id) {
+    const l = {
+        id,
+        steps: Array.from({length: 16}, () => ({ on: false, decay: 1.0, prob: 1.0, ratchet: 1, last: false, accent: false })),
+        freq: 400 + (id * 600), q: 5, masterDecay: 0.5, pan: 0, level: 0.6, division: 1, // 1 = 16ths
+        filters: [], currentStep: 0
+    };
+
+    const panner = audioCtx.createPanner();
+    panner.panningModel = 'equalpower';
+    const lGain = audioCtx.createGain();
+
+    for(let i=0; i<4; i++) {
+        let f = audioCtx.createBiquadFilter();
+        f.type = 'bandpass';
+        if(i > 0) l.filters[i-1].connect(f);
+        l.filters.push(f);
+    }
+    l.filters[3].connect(lGain);
+    lGain.connect(panner);
+    panner.connect(masterBus);
+    
+    l.gainNode = lGain;
+    l.pannerNode = panner;
+    return l;
+}
+
+for(let i=0; i<6; i++) lanes.push(createLane(i));
+
+function trigger(lane, step, time) {
+    if(!step.on || Math.random() > step.prob) return;
+    
+    const rCount = parseInt(step.ratchet);
+    const divMult = parseInt(lane.division);
+    const stepDur = ((60/tempo)/4) * divMult;
+    const subDur = stepDur / rCount;
+    
+    const accAmt = document.getElementById('m-accent').value;
+    const gainBase = lane.level * (step.accent ? accAmt : 1.0);
+
+    for(let r=0; r<rCount; r++) {
+        const sTime = time + (r * subDur);
+        const src = audioCtx.createBufferSource();
+        src.buffer = noiseBuffer; src.loop = true;
+        
+        const env = audioCtx.createGain();
+        const d = (lane.masterDecay * step.decay) / rCount;
+
+        env.gain.setValueAtTime(0.0001, sTime);
+        env.gain.exponentialRampToValueAtTime(gainBase, sTime + 0.005);
+        env.gain.exponentialRampToValueAtTime(0.0001, sTime + d);
+
+        src.connect(env); env.connect(lane.filters[0]);
+        src.start(sTime); src.stop(sTime + d + 0.1);
+    }
+    
+    // UI feedback
+    const el = document.getElementById(`l${lane.id}s${lane.currentStep}`);
+    if(el) {
+        el.classList.add('playing');
+        setTimeout(() => el.classList.remove('playing'), 50);
+    }
+}
+
+function scheduler() {
+    while (nextStepTime < audioCtx.currentTime + scheduleAheadTime) {
+        lanes.forEach(lane => {
+            // Each lane tracks its own 'internal' tick relative to master 16th clock
+            // Simplified: we check if this master 16th tick matches the lane division
+            trigger(lane, lane.steps[lane.currentStep], nextStepTime);
+            
+            let forcedReset = lane.steps[lane.currentStep].last;
+            lane.currentStep++;
+            if(lane.currentStep >= 16 || forcedReset) lane.currentStep = 0;
+        });
+        
+        const secondsPer16th = (60 / tempo) / 4;
+        nextStepTime += secondsPer16th;
+    }
+    if(isPlaying) setTimeout(scheduler, 25);
+}
+
+// UI Generation
+const container = document.getElementById('lanes-container');
+lanes.forEach((lane, lIdx) => {
+    const div = document.createElement('div');
+    div.className = 'lane';
+    div.innerHTML = `
+        <div class="knob-group">
+            <span class="lane-title">LANE ${lIdx+1}</span>
+            <div class="control-unit"><label>Freq</label><input type="range" class="p-freq" data-l="${lIdx}" min="50" max="10000" value="${lane.freq}"></div>
+            <div class="control-unit"><label>Res</label><input type="range" class="p-q" data-l="${lIdx}" min="0.1" max="40" step="0.1" value="${lane.q}"></div>
+            <div class="control-unit"><label>MaxDec</label><input type="range" class="p-mdec" data-l="${lIdx}" min="0.01" max="4" step="0.01" value="${lane.masterDecay}"></div>
+            <div class="control-unit"><label>Level</label><input type="range" class="p-lev" data-l="${lIdx}" min="0" max="1" step="0.01" value="${lane.level}"></div>
+            <div class="control-unit"><label>Pan</label><input type="range" class="p-pan" data-l="${lIdx}" min="-1" max="1" step="0.1" value="0"></div>
+            <div class="control-unit"><label>Div</label>
+                <select class="p-div" data-l="${lIdx}" style="background:#444; color:white; font-size:9px;">
+                    <option value="1">1/16</option><option value="2">1/8</option><option value="4">1/4</option>
+                </select>
+            </div>
+        </div>
+        <div class="step-container" id="grid-${lIdx}"></div>
+    `;
+    container.appendChild(div);
+
+    const grid = div.querySelector('.step-container');
+    lane.steps.forEach((step, sIdx) => {
+        const sBlock = document.createElement('div');
+        sBlock.className = 'step-block';
+        sBlock.id = `l${lIdx}s${sIdx}`;
+        sBlock.innerHTML = `
+            <button class="btn-toggle" onclick="toggleStep(${lIdx}, ${sIdx}, this)">${sIdx+1}</button>
+            <input type="range" title="Decay" oninput="lanes[${lIdx}].steps[${sIdx}].decay = this.value" min="0.01" max="1" step="0.01" value="1">
+            <input type="range" title="Prob" oninput="lanes[${lIdx}].steps[${sIdx}].prob = this.value" min="0" max="1" step="0.01" value="1">
+            <input type="range" title="Ratchet" oninput="lanes[${lIdx}].steps[${sIdx}].ratchet = this.value" min="1" max="4" step="1" value="1">
+            <div style="display:flex; gap:2px;">
+                <button style="flex:1" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].accent = !lanes[${lIdx}].steps[${sIdx}].accent">A</button>
+                <button style="flex:1" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].last = !lanes[${lIdx}].steps[${sIdx}].last">L</button>
+            </div>
+        `;
+        grid.appendChild(sBlock);
+    });
+});
+
+// Event Listeners
+function toggleStep(l, s, el) { lanes[l].steps[s].on = !lanes[l].steps[s].on; el.classList.toggle('active'); }
+
+document.getElementById('play-btn').onclick = () => { if(audioCtx.state==='suspended') audioCtx.resume(); isPlaying = true; nextStepTime = audioCtx.currentTime; scheduler(); };
+document.getElementById('stop-btn').onclick = () => { isPlaying = false; lanes.forEach(l => l.currentStep = 0); };
+document.getElementById('m-tempo').oninput = (e) => { tempo = e.target.value; document.getElementById('v-tempo').innerText = tempo; updateDelay(); };
+
+// Delay Updates
+function updateDelay() {
+    const beatDur = 60 / tempo;
+    const syncMult = parseFloat(document.getElementById('d-time').value);
+    delayNode.delayTime.setTargetAtTime(beatDur * syncMult, audioCtx.currentTime, 0.1);
+    delayFB.gain.value = document.getElementById('d-fb').value;
+    delayGain.gain.value = document.getElementById('d-mix').value;
+}
+document.getElementById('d-mix').oninput = updateDelay;
+document.getElementById('d-fb').oninput = updateDelay;
+document.getElementById('d-time').onchange = updateDelay;
+
+// Lane Param Listeners
+document.querySelectorAll('.p-freq').forEach(el => el.oninput = (e) => {
+    const l = lanes[e.target.dataset.l];
+    l.filters.forEach(f => f.frequency.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.05));
+});
+document.querySelectorAll('.p-q').forEach(el => el.oninput = (e) => {
+    const l = lanes[e.target.dataset.l];
+    l.filters.forEach(f => f.Q.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.05));
+});
+document.querySelectorAll('.p-mdec').forEach(el => el.oninput = (e) => lanes[e.target.dataset.l].masterDecay = e.target.value);
+document.querySelectorAll('.p-lev').forEach(el => el.oninput = (e) => lanes[e.target.dataset.l].level = e.target.value);
+document.querySelectorAll('.p-pan').forEach(el => el.oninput = (e) => lanes[e.target.dataset.l].pannerNode.pan.value = e.target.value);
+document.querySelectorAll('.p-div').forEach(el => el.onchange = (e) => lanes[e.target.dataset.l].division = e.target.value);
+
+</script>
+</body>
+</html>

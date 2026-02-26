@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOISE_DRUM_WIZARD_V2</title>
+    <style>
+        :root { --bg: #0a0a0a; --panel: #1a1a1a; --accent: #00ff95; --text: #ccc; --step-active: #3a3a3a; }
+        body { background: var(--bg); color: var(--text); font-family: 'Courier New', Courier, monospace; margin: 0; padding: 10px; font-size: 11px; overflow-x: hidden; }
+        
+        /* Help Overlay */
+        #help-layer { 
+            display: none; position: fixed; top:0; left:0; width:100%; height:100%; 
+            background: rgba(0, 255, 149, 0.1); z-index: 1000; pointer-events: none; 
+        }
+        .help-label { 
+            position: absolute; background: #00ff95; color: black; padding: 2px 5px; 
+            font-weight: bold; font-size: 10px; border-radius: 3px; transform: translate(-50%, -100%);
+        }
+
+        /* Layout */
+        #master-strip { display: flex; gap: 15px; background: #111; padding: 10px; border-bottom: 1px solid #333; align-items: center; flex-wrap: wrap; }
+        .lane { background: var(--panel); border: 1px solid #222; margin-bottom: 10px; padding: 8px; border-radius: 4px; }
+        .lane-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+
+        /* Step Grid */
+        .step-container { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
+        .step-block { 
+            background: #111; border: 1px solid #333; padding: 3px; 
+            display: flex; flex-direction: column; gap: 3px; position: relative;
+        }
+        .step-block.is-on { background: var(--step-active); border-color: #555; }
+        .step-block.hit { background: var(--accent) !important; transition: background 0s; }
+        
+        /* Controls */
+        .control-unit { display: flex; flex-direction: column; min-width: 45px; }
+        input[type=range] { width: 100%; height: 3px; appearance: none; background: #333; accent-color: var(--accent); }
+        input[type=range]::-webkit-slider-thumb { width: 8px; height: 10px; background: #888; border-radius: 1px; appearance: none; cursor: pointer; }
+        
+        button { background: #222; color: #888; border: 1px solid #444; padding: 3px; cursor: pointer; font-size: 9px; }
+        button.active { background: var(--accent); color: black; border-color: white; }
+        .btn-main { padding: 8px 15px; font-weight: bold; }
+        
+        /* Sub-controls within steps */
+        .step-btn-row { display: flex; gap: 1px; }
+        .step-btn { flex: 1; font-size: 8px; padding: 1px; }
+
+        @media (max-width: 900px) { .step-container { grid-template-columns: repeat(8, 1fr); } }
+        @media (max-width: 500px) { .step-container { grid-template-columns: repeat(4, 1fr); } }
+    </style>
+</head>
+<body>
+
+    <div id="help-layer"></div>
+
+    <div id="master-strip">
+        <button id="play-btn" class="btn-main">START</button>
+        <button id="stop-btn" class="btn-main">STOP</button>
+        <button id="help-btn" style="border-radius: 50%; width: 25px; height: 25px;">?</button>
+        
+        <div class="control-unit"><label>BPM</label><input type="range" id="m-tempo" min="20" max="300" value="120"></div>
+        <div class="control-unit"><label>VOL</label><input type="range" id="m-vol" min="0" max="1" step="0.01" value="0.7"></div>
+        <div class="control-unit"><label>ACCENT</label><input type="range" id="m-accent" min="1" max="2.5" step="0.1" value="1.5"></div>
+        
+        <div style="width:1px; height:30px; background:#333;"></div>
+        
+        <div class="control-unit"><label>D-MIX</label><input type="range" id="d-mix" min="0" max="1" step="0.01" value="0.2"></div>
+        <div class="control-unit"><label>D-FB</label><input type="range" id="d-fb" min="0" max="0.95" step="0.01" value="0.5"></div>
+        <div class="control-unit">
+            <label>D-TIME</label>
+            <select id="d-time" style="background:#222; color:white; border:1px solid #444; font-size:9px;">
+                <option value="0.75">DOTTED</option>
+                <option value="0.5" selected>8TH</option>
+                <option value="0.333">TRIPLET</option>
+                <option value="0.25">16TH</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="lanes-container"></div>
+
+<script>
+/** DSP WIZARD V2 **/
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterBus = audioCtx.createGain();
+
+// --- DELAY ENGINE ---
+const delayNode = audioCtx.createDelay(2.0);
+const delayGain = audioCtx.createGain();
+const delayFB = audioCtx.createGain();
+const delayFilter = audioCtx.createBiquadFilter();
+const delayClipper = audioCtx.createWaveShaper();
+
+const curve = new Float32Array(44100);
+for (let i = 0; i < 44100; i++) {
+    let x = (i * 2) / 44100 - 1;
+    curve[i] = Math.tanh(x * 1.5); // Slightly driven tanh
+}
+delayClipper.curve = curve;
+delayFilter.type = 'bandpass';
+delayFilter.frequency.value = 1000;
+
+masterBus.connect(delayNode);
+delayNode.connect(delayFilter);
+delayFilter.connect(delayClipper);
+delayClipper.connect(delayFB);
+delayFB.connect(delayNode);
+delayNode.connect(delayGain);
+
+const finalOut = audioCtx.createGain();
+masterBus.connect(finalOut);
+delayGain.connect(finalOut);
+finalOut.connect(audioCtx.destination);
+
+// --- NOISE GENERATOR ---
+const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+const noiseData = noiseBuffer.getChannelData(0);
+for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+
+// --- STATE ---
+let isPlaying = false;
+let tempo = 120;
+let nextStepTime = 0.0;
+let masterTick = 0; // The "heartbeat" 16th note count
+const lanes = [];
+
+function createLane(id) {
+    const lane = {
+        id,
+        steps: Array.from({length: 16}, () => ({ on: false, decay: 0.8, prob: 1.0, ratchet: 1, last: false, accent: false })),
+        freq: 200 + (id * 800), q: 10, masterDecay: 0.4, pan: 0, level: 0.5, division: 1,
+        filters: [], currentStep: 0
+    };
+
+    // Use StereoPanner for actual Left/Right panning
+    const panner = audioCtx.createStereoPanner();
+    const lGain = audioCtx.createGain();
+
+    // Chained Filters for 48dB slope
+    for(let i=0; i<4; i++) {
+        let f = audioCtx.createBiquadFilter();
+        f.type = 'bandpass';
+        f.frequency.value = lane.freq;
+        f.Q.value = lane.q;
+        if(i > 0) lane.filters[i-1].connect(f);
+        lane.filters.push(f);
+    }
+    lane.filters[3].connect(lGain);
+    lGain.connect(panner);
+    panner.connect(masterBus);
+    
+    lane.gainNode = lGain;
+    lane.pannerNode = panner;
+    return lane;
+}
+
+for(let i=0; i<6; i++) lanes.push(createLane(i));
+
+function trigger(lane, step, time) {
+    if(!step.on || Math.random() > step.prob) return;
+    
+    const rCount = parseInt(step.ratchet);
+    const stepDur = ((60/tempo)/4) * lane.division;
+    const subDur = stepDur / rCount;
+    
+    const accAmt = document.getElementById('m-accent').value;
+    const gainBase = lane.level * (step.accent ? accAmt : 1.0);
+
+    for(let r=0; r<rCount; r++) {
+        const sTime = time + (r * subDur);
+        const src = audioCtx.createBufferSource();
+        src.buffer = noiseBuffer; src.loop = true;
+        
+        const env = audioCtx.createGain();
+        const d = (lane.masterDecay * step.decay) / Math.sqrt(rCount); // Compensate decay for ratchets
+
+        env.gain.setValueAtTime(0.00001, sTime);
+        env.gain.exponentialRampToValueAtTime(gainBase, sTime + 0.003);
+        env.gain.exponentialRampToValueAtTime(0.00001, sTime + d);
+
+        src.connect(env); env.connect(lane.filters[0]);
+        src.start(sTime); src.stop(sTime + d + 0.05);
+    }
+    
+    // Visual hit
+    const el = document.getElementById(`l${lane.id}s${lane.currentStep}`);
+    if(el) {
+        el.classList.add('hit');
+        setTimeout(() => el.classList.remove('hit'), 40);
+    }
+}
+
+function scheduler() {
+    while (nextStepTime < audioCtx.currentTime + 0.1) {
+        lanes.forEach(lane => {
+            // Check if masterTick aligns with this lane's speed
+            if (masterTick % lane.division === 0) {
+                trigger(lane, lane.steps[lane.currentStep], nextStepTime);
+                
+                let forcedReset = lane.steps[lane.currentStep].last;
+                lane.currentStep++;
+                if(lane.currentStep >= 16 || forcedReset) lane.currentStep = 0;
+            }
+        });
+        
+        nextStepTime += (60 / tempo) / 4;
+        masterTick++;
+    }
+    if(isPlaying) setTimeout(scheduler, 25);
+}
+
+// --- UI RENDER ---
+const container = document.getElementById('lanes-container');
+lanes.forEach((l, lIdx) => {
+    const div = document.createElement('div');
+    div.className = 'lane';
+    div.innerHTML = `
+        <div class="lane-header">
+            <span style="color:var(--accent)">L${lIdx+1}</span>
+            <div class="control-unit"><label>F</label><input type="range" class="p-freq" data-l="${lIdx}" min="40" max="12000" value="${l.freq}"></div>
+            <div class="control-unit"><label>Q</label><input type="range" class="p-q" data-l="${lIdx}" min="0.5" max="50" step="0.1" value="${l.q}"></div>
+            <div class="control-unit"><label>DEC</label><input type="range" class="p-mdec" data-l="${lIdx}" min="0.01" max="4" step="0.01" value="${l.masterDecay}"></div>
+            <div class="control-unit"><label>PAN</label><input type="range" class="p-pan" data-l="${lIdx}" min="-1" max="1" step="0.1" value="0"></div>
+            <div class="control-unit"><label>DIV</label>
+                <select class="p-div" data-l="${lIdx}" style="background:#222; color:#fff; font-size:8px;">
+                    <option value="1">1/16</option><option value="2">1/8</option><option value="4">1/4</option>
+                </select>
+            </div>
+        </div>
+        <div class="step-container" id="grid-${lIdx}"></div>
+    `;
+    container.appendChild(div);
+
+    const grid = div.querySelector('.step-container');
+    l.steps.forEach((step, sIdx) => {
+        const sBlock = document.createElement('div');
+        sBlock.className = 'step-block';
+        sBlock.id = `l${lIdx}s${sIdx}`;
+        sBlock.innerHTML = `
+            <button class="step-btn" style="height:12px" onclick="toggleStep(${lIdx}, ${sIdx}, this)"></button>
+            <input type="range" oninput="lanes[${lIdx}].steps[${sIdx}].decay = this.value" min="0.01" max="1" step="0.01" value="0.8">
+            <input type="range" oninput="lanes[${lIdx}].steps[${sIdx}].prob = this.value" min="0" max="1" step="0.01" value="1">
+            <input type="range" oninput="lanes[${lIdx}].steps[${sIdx}].ratchet = this.value" min="1" max="4" step="1" value="1">
+            <div class="step-btn-row">
+                <button class="step-btn" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].accent = !lanes[${lIdx}].steps[${sIdx}].accent">A</button>
+                <button class="step-btn" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].last = !lanes[${lIdx}].steps[${sIdx}].last">L</button>
+            </div>
+        `;
+        grid.appendChild(sBlock);
+    });
+});
+
+// --- EVENTS ---
+function toggleStep(l, s, el) { 
+    lanes[l].steps[s].on = !lanes[l].steps[s].on; 
+    document.getElementById(`l${l}s${s}`).classList.toggle('is-on', lanes[l].steps[s].on);
+}
+
+document.getElementById('play-btn').onclick = () => { if(audioCtx.state==='suspended') audioCtx.resume(); isPlaying = true; nextStepTime = audioCtx.currentTime; masterTick = 0; scheduler(); };
+document.getElementById('stop-btn').onclick = () => { isPlaying = false; lanes.forEach(l => l.currentStep = 0); };
+document.getElementById('m-tempo').oninput = (e) => { tempo = e.target.value; updateDelay(); };
+
+// Delay / FX Logic
+function updateDelay() {
+    const syncMult = parseFloat(document.getElementById('d-time').value);
+    delayNode.delayTime.setTargetAtTime((60 / tempo) * syncMult, audioCtx.currentTime, 0.1);
+    delayFB.gain.value = document.getElementById('d-fb').value;
+    delayGain.gain.value = document.getElementById('d-mix').value;
+}
+document.getElementById('d-mix').oninput = updateDelay;
+document.getElementById('d-fb').oninput = updateDelay;
+document.getElementById('d-time').onchange = updateDelay;
+
+// Parameter Listeners
+document.querySelectorAll('.p-freq').forEach(el => el.oninput = (e) => {
+    lanes[e.target.dataset.l].filters.forEach(f => f.frequency.value = e.target.value);
+});
+document.querySelectorAll('.p-q').forEach(el => el.oninput = (e) => {
+    lanes[e.target.dataset.l].filters.forEach(f => f.Q.value = e.target.value);
+});
+document.querySelectorAll('.p-pan').forEach(el => el.oninput = (e) => {
+    lanes[e.target.dataset.l].pannerNode.pan.value = e.target.value;
+});
+document.querySelectorAll('.p-div').forEach(el => el.onchange = (e) => {
+    lanes[e.target.dataset.l].division = parseInt(e.target.value);
+});
+document.querySelectorAll('.p-mdec').forEach(el => el.oninput = (e) => lanes[e.target.dataset.l].masterDecay = e.target.value);
+
+// Help Overlay Toggle
+document.getElementById('help-btn').onclick = () => {
+    const layer = document.getElementById('help-layer');
+    const isVisible = layer.style.display === 'block';
+    layer.style.display = isVisible ? 'none' : 'block';
+    if(!isVisible) {
+        layer.innerHTML = `
+            <div class="help-label" style="top:70px; left:150px">Tempo & Delay Master</div>
+            <div class="help-label" style="top:110px; left:80px">Filter Freq & Res</div>
+            <div class="help-label" style="top:110px; left:220px">Lane Decay & Pan</div>
+            <div class="help-label" style="top:155px; left:50px">Step On/Off</div>
+            <div class="help-label" style="top:175px; left:50px">Step Decay %</div>
+            <div class="help-label" style="top:190px; left:50px">Probability</div>
+            <div class="help-label" style="top:205px; left:50px">Ratchet (1-4)</div>
+            <div class="help-label" style="top:225px; left:50px">Accent / Last Step</div>
+        `;
+    }
+};
+
+</script>
+</body>
+</html>
