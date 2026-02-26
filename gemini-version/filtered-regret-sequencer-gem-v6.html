@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOISE_DRUM_V5_FIXED</title>
+    <style>
+        :root { --bg: #0b0b0b; --panel: #181818; --accent: #00ffcc; --text: #e0e0e0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; margin: 0; padding: 15px; font-size: 11px; }
+        
+        #master-strip { display: flex; gap: 15px; background: #222; padding: 12px; border: 1px solid #444; border-radius: 4px; margin-bottom: 15px; align-items: center; flex-wrap: wrap; }
+        .lane { background: var(--panel); border: 1px solid #333; margin-bottom: 12px; padding: 10px; border-radius: 4px; }
+        
+        .step-container { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-top: 10px; }
+        .step-block { background: #111; padding: 5px; border: 1px solid #222; display: flex; flex-direction: column; gap: 4px; }
+        .step-block.is-on { border-color: #00ffcc; background: #222; }
+        .step-block.hit { background: var(--accent) !important; color: #000; }
+        
+        .control-unit { display: flex; flex-direction: column; min-width: 60px; }
+        label { font-size: 8px; color: #777; margin-bottom: 2px; text-transform: uppercase; }
+        input[type=range] { width: 100%; height: 4px; appearance: none; background: #333; accent-color: var(--accent); }
+        
+        button { background: #2a2a2a; color: #fff; border: 1px solid #444; padding: 5px; cursor: pointer; font-size: 9px; }
+        button.active { background: var(--accent); color: #000; }
+        .btn-main { padding: 8px 14px; font-weight: bold; border-color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <div id="master-strip">
+        <button id="play-btn" class="btn-main">START</button>
+        <button id="stop-btn" class="btn-main">STOP</button>
+        <button id="rand-btn">RANDOM ALL</button>
+        <button id="midi-btn">MIDI SLAVE: OFF</button>
+        
+        <div class="control-unit"><label>Tempo</label><input type="range" id="m-tempo" min="40" max="240" value="120"></div>
+        <div class="control-unit"><label>Vol</label><input type="range" id="m-vol" min="0" max="1" step="0.01" value="0.7"></div>
+        <div class="control-unit"><label>Accent</label><input type="range" id="m-accent" min="1" max="2.5" step="0.1" value="1.6"></div>
+        
+        <div style="width:1px; height:30px; background:#444;"></div>
+        
+        <div class="control-unit"><label>D-Mix</label><input type="range" id="d-mix" min="0" max="1" step="0.01" value="0.2"></div>
+        <div class="control-unit"><label>D-FB</label><input type="range" id="d-fb" min="0" max="0.5" step="0.01" value="0.2"></div>
+        <div class="control-unit"><label>D-Time</label>
+            <select id="d-time" style="background:#111; color:#fff; border:1px solid #444; font-size:9px;">
+                <option value="0.75">Dotted</option><option value="0.5" selected>8th</option><option value="0.33">Triplet</option><option value="0.25">16th</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="lanes-container"></div>
+
+<script>
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterBus = audioCtx.createGain();
+
+// --- DELAY ---
+const delayNode = audioCtx.createDelay(2.0);
+const delayGain = audioCtx.createGain();
+const delayFB = audioCtx.createGain();
+const delayFilter = audioCtx.createBiquadFilter();
+delayFilter.type = 'bandpass'; delayFilter.frequency.value = 1000;
+
+masterBus.connect(delayNode);
+delayNode.connect(delayFilter);
+delayFilter.connect(delayFB);
+delayFB.connect(delayNode);
+delayNode.connect(delayGain);
+
+const finalOut = audioCtx.createGain();
+masterBus.connect(finalOut);
+delayGain.connect(finalOut);
+finalOut.connect(audioCtx.destination);
+
+// --- NOISE ---
+const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+const nData = noiseBuffer.getChannelData(0);
+for (let i = 0; i < nData.length; i++) nData[i] = Math.random() * 2 - 1;
+
+// --- STATE ---
+let isPlaying = false;
+let isMidiSlave = false;
+let tempo = 120;
+let nextStepTime = 0.0;
+let masterTick = 0;
+let midiTickCounter = 0;
+const lanes = [];
+
+function createLane(id) {
+    const l = {
+        id,
+        steps: Array.from({length: 16}, () => ({ on: false, decay: 0.5, prob: 1.0, ratchet: 1, last: false, accent: false })),
+        freq: 500 + (id * 800), q: 5, masterDecay: 0.3, pan: 0, level: 0.5, division: 1,
+        filters: [], currentStep: 0
+    };
+
+    const panner = audioCtx.createStereoPanner();
+    const lGain = audioCtx.createGain();
+
+    for(let i=0; i<4; i++) {
+        let f = audioCtx.createBiquadFilter();
+        f.type = 'bandpass'; f.frequency.value = l.freq; f.Q.value = l.q;
+        if(i > 0) l.filters[i-1].connect(f);
+        l.filters.push(f);
+    }
+    l.filters[3].connect(lGain);
+    lGain.connect(panner);
+    panner.connect(masterBus);
+    
+    l.gainNode = lGain;
+    l.pannerNode = panner;
+    return l;
+}
+
+for(let i=0; i<6; i++) lanes.push(createLane(i));
+
+function trigger(lane, step, time) {
+    if(!step.on || Math.random() > step.prob) return;
+    
+    const rCount = parseInt(step.ratchet);
+    const stepDur = ((60/tempo)/4) * lane.division;
+    const subDur = stepDur / rCount;
+    const gainBase = lane.level * (step.accent ? document.getElementById('m-accent').value : 1.0);
+
+    for(let r = 0; r < rCount; r++) {
+        const sTime = time + (r * subDur);
+        const src = audioCtx.createBufferSource();
+        src.buffer = noiseBuffer;
+        src.loop = true;
+        
+        const env = audioCtx.createGain();
+        // ENSURE DECAY PULLS FROM LIVE UI VALUES
+        const decayTime = Math.max(0.005, (parseFloat(lane.masterDecay) * parseFloat(step.decay)) / Math.sqrt(rCount));
+
+        env.gain.setValueAtTime(0.0001, sTime);
+        env.gain.exponentialRampToValueAtTime(gainBase, sTime + 0.003);
+        env.gain.exponentialRampToValueAtTime(0.0001, sTime + decayTime);
+
+        src.connect(env);
+        env.connect(lane.filters[0]); // Connect to start of 4-pole chain
+        
+        src.start(sTime);
+        src.stop(sTime + decayTime + 0.1);
+    }
+    
+    const el = document.getElementById(`l${lane.id}s${lane.currentStep}`);
+    if(el) {
+        el.classList.add('hit');
+        setTimeout(() => el.classList.remove('hit'), 60);
+    }
+}
+
+function tick() {
+    lanes.forEach(lane => {
+        if (masterTick % lane.division === 0) {
+            trigger(lane, lane.steps[lane.currentStep], isMidiSlave ? audioCtx.currentTime : nextStepTime);
+            if(lane.steps[lane.currentStep].last) lane.currentStep = 0;
+            else {
+                lane.currentStep++;
+                if(lane.currentStep >= 16) lane.currentStep = 0;
+            }
+        }
+    });
+    masterTick++;
+}
+
+function scheduler() {
+    if(isMidiSlave) return;
+    while (nextStepTime < audioCtx.currentTime + 0.1) {
+        tick();
+        nextStepTime += (60 / tempo) / 4;
+    }
+    if(isPlaying) setTimeout(scheduler, 25);
+}
+
+// UI Build
+const container = document.getElementById('lanes-container');
+lanes.forEach((l, lIdx) => {
+    const div = document.createElement('div');
+    div.className = 'lane';
+    div.innerHTML = `
+        <div style="display:flex; gap:12px; align-items:flex-end; margin-bottom:5px;">
+            <div class="control-unit"><label>Freq</label><input type="range" class="p-freq" data-l="${lIdx}" min="50" max="10000" value="${l.freq}"></div>
+            <div class="control-unit"><label>Res</label><input type="range" class="p-q" data-l="${lIdx}" min="0.1" max="50" step="0.1" value="${l.q}"></div>
+            <div class="control-unit"><label>MasterDec</label><input type="range" class="p-mdec" data-l="${lIdx}" min="0.01" max="4" step="0.01" value="${l.masterDecay}"></div>
+            <div class="control-unit"><label>Pan</label><input type="range" class="p-pan" data-l="${lIdx}" min="-1" max="1" step="0.1" value="0"></div>
+            <div class="control-unit"><label>Speed</label>
+                <select class="p-div" data-l="${lIdx}" style="background:#222; color:#fff; font-size:8px;">
+                    <option value="1">1/16</option><option value="2">1/8</option><option value="4">1/4</option>
+                </select>
+            </div>
+        </div>
+        <div class="step-container"></div>
+    `;
+    container.appendChild(div);
+
+    const grid = div.querySelector('.step-container');
+    l.steps.forEach((step, sIdx) => {
+        const sBlock = document.createElement('div');
+        sBlock.className = 'step-block';
+        sBlock.id = `l${lIdx}s${sIdx}`;
+        sBlock.innerHTML = `
+            <button style="height:10px;" onclick="toggleStep(${lIdx}, ${sIdx}, this)"></button>
+            <input type="range" class="s-dec" oninput="lanes[${lIdx}].steps[${sIdx}].decay = this.value" min="0.01" max="1" step="0.01" value="0.5">
+            <input type="range" class="s-prob" oninput="lanes[${lIdx}].steps[${sIdx}].prob = this.value" min="0" max="1" step="0.01" value="1">
+            <input type="range" class="s-rat" oninput="lanes[${lIdx}].steps[${sIdx}].ratchet = this.value" min="1" max="4" step="1" value="1">
+            <div style="display:flex; gap:2px;">
+                <button class="s-acc" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].accent = !lanes[${lIdx}].steps[${sIdx}].accent">A</button>
+                <button class="s-lst" onclick="this.classList.toggle('active'); lanes[${lIdx}].steps[${sIdx}].last = !lanes[${lIdx}].steps[${sIdx}].last">L</button>
+            </div>
+        `;
+        grid.appendChild(sBlock);
+    });
+});
+
+function toggleStep(l, s, el) { 
+    lanes[l].steps[s].on = !lanes[l].steps[s].on; 
+    document.getElementById(`l${l}s${s}`).classList.toggle('is-on', lanes[l].steps[s].on);
+}
+
+document.getElementById('play-btn').onclick = () => { isPlaying = true; nextStepTime = audioCtx.currentTime; masterTick = 0; scheduler(); };
+document.getElementById('stop-btn').onclick = () => { isPlaying = false; lanes.forEach(l => l.currentStep = 0); };
+document.getElementById('m-tempo').oninput = (e) => { tempo = e.target.value; updateDelay(); };
+
+document.getElementById('rand-btn').onclick = () => {
+    lanes.forEach((l, lIdx) => {
+        l.freq = 100 + Math.random() * 5000; l.q = 1 + Math.random() * 20;
+        l.filters.forEach(f => { f.frequency.value = l.freq; f.Q.value = l.q; });
+        l.steps.forEach((s, sIdx) => {
+            s.on = Math.random() > 0.7;
+            s.decay = Math.random();
+            s.accent = Math.random() > 0.8;
+            s.last = Math.random() > 0.95;
+            const el = document.getElementById(`l${lIdx}s${sIdx}`);
+            el.classList.toggle('is-on', s.on);
+            el.querySelector('.s-dec').value = s.decay;
+            el.querySelector('.s-acc').classList.toggle('active', s.accent);
+            el.querySelector('.s-lst').classList.toggle('active', s.last);
+        });
+    });
+};
+
+function updateDelay() {
+    delayNode.delayTime.setTargetAtTime((60/tempo)*parseFloat(document.getElementById('d-time').value), audioCtx.currentTime, 0.1);
+    delayFB.gain.value = document.getElementById('d-fb').value;
+    delayGain.gain.value = document.getElementById('d-mix').value;
+}
+
+// Master Listeners
+document.querySelectorAll('.p-freq').forEach(el => el.oninput = (e) => {
+    const l = lanes[e.target.dataset.l];
+    l.freq = e.target.value;
+    l.filters.forEach(f => f.frequency.value = l.freq);
+});
+document.querySelectorAll('.p-q').forEach(el => el.oninput = (e) => {
+    const l = lanes[e.target.dataset.l];
+    l.q = e.target.value;
+    l.filters.forEach(f => f.Q.value = l.q);
+});
+document.querySelectorAll('.p-mdec').forEach(el => el.oninput = (e) => {
+    lanes[e.target.dataset.l].masterDecay = e.target.value;
+});
+document.querySelectorAll('.p-pan').forEach(el => el.oninput = (e) => {
+    lanes[e.target.dataset.l].pannerNode.pan.value = e.target.value;
+});
+document.querySelectorAll('.p-div').forEach(el => el.onchange = (e) => {
+    lanes[e.target.dataset.l].division = parseInt(e.target.value);
+});
+</script>
+</body>
+</html>
