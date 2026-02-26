@@ -1,0 +1,1740 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Filtered Regret Sequencer</title>
+  <style>
+    :root{
+      --bg:#0f1115;
+      --panel:#151a22;
+      --panel2:#10141b;
+      --text:#e7eaf0;
+      --muted:#9aa4b2;
+      --line:#263043;
+      --accent:#74c0fc;
+      --hit:#ffd43b;
+      --on:#63e6be;
+      --danger:#ff6b6b;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius:14px;
+      --stepH:28px;
+      --gap:10px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --ui: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(180deg, #0b0d12, var(--bg));
+      color:var(--text);
+      font-family:var(--ui);
+      letter-spacing:.2px;
+    }
+    header{
+      padding:16px 16px 10px;
+      position:sticky; top:0; z-index:50;
+      backdrop-filter: blur(10px);
+      background:rgba(10,12,18,.72);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+      max-width:1100px;
+      margin:0 auto;
+    }
+    .brand{
+      min-width:220px;
+      padding:10px 12px;
+      border-radius:var(--radius);
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.06);
+      box-shadow:var(--shadow);
+    }
+    .brand h1{
+      margin:0;
+      font-size:14px;
+      font-weight:700;
+    }
+    .brand p{
+      margin:6px 0 0;
+      font-family:var(--mono);
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.3;
+    }
+    .panel{
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:10px 12px;
+    }
+    .controls{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+      flex:1;
+      min-width:280px;
+    }
+    .ctrl{
+      min-width:120px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .ctrl.small{ min-width:92px; }
+    .ctrl .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .abbr{
+      font-family:var(--mono);
+      font-size:11px;
+      color:var(--muted);
+      user-select:none;
+    }
+    body.help-on .abbr{ display:none; }
+    .full-label{
+      display:none;
+      font-size:11px;
+      color:var(--muted);
+      user-select:none;
+    }
+    body.help-on .full-label{ display:block; }
+    input[type="range"]{
+      width:100%;
+    }
+    input[type="number"], select{
+      width:100%;
+      padding:6px 8px;
+      background:var(--panel2);
+      color:var(--text);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:10px;
+      outline:none;
+    }
+    button{
+      cursor:pointer;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.05);
+      color:var(--text);
+      border-radius:12px;
+      padding:8px 10px;
+      font-weight:700;
+      letter-spacing:.2px;
+    }
+    button:hover{ background:rgba(255,255,255,.08); }
+    button:active{ transform:translateY(1px); }
+    .btnrow{ display:flex; gap:10px; align-items:center; }
+    .btn-primary{ border-color:rgba(116,192,252,.6); }
+    .btn-danger{ border-color:rgba(255,107,107,.55); }
+    .btn-on{
+      background:rgba(99,230,190,.10);
+      border-color:rgba(99,230,190,.55);
+    }
+    .pill{
+      font-family:var(--mono);
+      font-size:11px;
+      padding:4px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      color:var(--muted);
+      user-select:none;
+    }
+    main{
+      max-width:1100px;
+      margin:0 auto;
+      padding:14px 16px 60px;
+    }
+    .lane{
+      margin-top:12px;
+      border-radius:var(--radius);
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.06);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .lane-head{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      flex-wrap:wrap;
+      padding:10px 12px;
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .lane-title{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      min-width:140px;
+    }
+    .lane-num{
+      width:28px; height:28px;
+      display:grid; place-items:center;
+      border-radius:10px;
+      background:rgba(116,192,252,.10);
+      border:1px solid rgba(116,192,252,.25);
+      font-family:var(--mono);
+      font-weight:800;
+      color:var(--accent);
+    }
+    .lane-title .name{
+      font-size:13px;
+      font-weight:800;
+      margin:0;
+    }
+    .lane-grid{
+      padding:10px 12px 0;
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+    .lane-controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:flex-end;
+    }
+    .lane-controls .ctrl{ min-width:110px; }
+    .lane-controls .ctrl.wide{ min-width:150px; }
+    .seq-wrap{
+      padding:0 12px 12px;
+    }
+    .seq{
+      display:grid;
+      grid-template-columns: repeat(16, 1fr);
+      gap:6px;
+      margin-top:8px;
+    }
+    .step{
+      position:relative;
+      height:var(--stepH);
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.03);
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-family:var(--mono);
+      font-size:11px;
+      color:rgba(231,234,240,.7);
+      user-select:none;
+    }
+    .step.on{
+      background:rgba(99,230,190,.10);
+      border-color:rgba(99,230,190,.45);
+      color:rgba(231,234,240,.92);
+    }
+    .step.cursor::after{
+      content:"";
+      position:absolute;
+      inset:-1px;
+      border:2px solid rgba(116,192,252,.85);
+      border-radius:12px;
+      pointer-events:none;
+      box-shadow:0 0 0 3px rgba(116,192,252,.12);
+    }
+    .step.selected{
+      outline:2px solid rgba(255,255,255,.22);
+      outline-offset:1px;
+    }
+    .step .dots{
+      position:absolute;
+      right:6px;
+      top:6px;
+      display:flex;
+      gap:4px;
+    }
+    .dot{
+      width:6px; height:6px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.18);
+      opacity:.55;
+    }
+    .dot.accent{ background:rgba(116,192,252,.9); border-color:rgba(116,192,252,.9); opacity:.9; }
+    .dot.last{ background:rgba(255,212,59,.95); border-color:rgba(255,212,59,.95); opacity:.95; }
+    .step.hit{
+      animation: hitBlink 120ms ease-in-out 0s 2;
+    }
+    @keyframes hitBlink{
+      0%{ box-shadow: 0 0 0 0 rgba(255,212,59,.0); background: rgba(255,212,59,.06);}
+      50%{ box-shadow: 0 0 0 6px rgba(255,212,59,.12); background: rgba(255,212,59,.14);}
+      100%{ box-shadow: 0 0 0 0 rgba(255,212,59,.0); }
+    }
+
+    .editor{
+      padding:10px 12px 12px;
+      border-top:1px solid rgba(255,255,255,.06);
+      background:rgba(0,0,0,.12);
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:10px;
+    }
+    .editor-top{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .editor-title{
+      font-family:var(--mono);
+      font-size:12px;
+      color:var(--muted);
+    }
+    .tinybtn{
+      padding:6px 8px;
+      border-radius:10px;
+      font-size:12px;
+      font-family:var(--mono);
+    }
+    .tinybtn.on{
+      background:rgba(116,192,252,.14);
+      border-color:rgba(116,192,252,.55);
+    }
+    .tinybtn.laston{
+      background:rgba(255,212,59,.10);
+      border-color:rgba(255,212,59,.55);
+    }
+    .editor-ctrls{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+    .editor-ctrls .ctrl{ min-width:120px; }
+    .hint{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.35;
+      margin:0;
+    }
+    .footer-note{
+      margin-top:14px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+      max-width:880px;
+    }
+
+    /* responsive: lane steps wrap into 2 rows of 8 */
+    @media (max-width: 940px){
+      .seq{ grid-template-columns: repeat(8, 1fr); }
+    }
+    /* responsive: lane steps wrap into 4 rows of 4 (mobile) */
+    @media (max-width: 540px){
+      :root{ --stepH:34px; }
+      .seq{ grid-template-columns: repeat(4, 1fr); }
+      .brand{ min-width: 100%; }
+      .controls{ min-width: 100%; }
+      .ctrl{ min-width: 46%; }
+      .lane-controls .ctrl{ min-width: 46%; }
+      .editor-ctrls .ctrl{ min-width: 46%; }
+    }
+    .disabled{
+      opacity:.55;
+      pointer-events:none;
+      filter:grayscale(.2);
+    }
+    .toast{
+      position:fixed;
+      left:16px;
+      bottom:16px;
+      z-index:100;
+      background:rgba(0,0,0,.7);
+      border:1px solid rgba(255,255,255,.10);
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:14px;
+      font-size:12px;
+      max-width:min(520px, calc(100% - 32px));
+      display:none;
+    }
+    .toast.show{ display:block; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <div class="brand">
+      <h1>Filtered Regret Sequencer</h1>
+      <p>Six lanes. One shared noise source. Cascade bandpass for steeper slopes. MIDI clock optional. No samples because we’re grown-ups.</p>
+    </div>
+
+    <div class="controls panel" id="masterPanel">
+      <div class="ctrl wide">
+        <div class="abbr">TEMPO</div>
+        <div class="full-label">Tempo (BPM)</div>
+        <div class="row">
+          <input id="tempo" type="range" min="20" max="300" step="1" value="120" />
+          <input id="tempoNum" type="number" min="20" max="300" step="1" value="120" />
+        </div>
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">VOL</div>
+        <div class="full-label">Master volume</div>
+        <input id="masterVol" type="range" min="0" max="1" step="0.001" value="0.8" />
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">ACC</div>
+        <div class="full-label">Accent amount</div>
+        <input id="accentAmt" type="range" min="0" max="1" step="0.001" value="0.35" />
+      </div>
+
+      <div class="ctrl wide">
+        <div class="abbr">DELAY</div>
+        <div class="full-label">Delay (sync)</div>
+        <div class="row">
+          <select id="delayDiv">
+            <option value="1/16">1/16</option>
+            <option value="1/8">1/8</option>
+            <option value="1/4" selected>1/4</option>
+            <option value="1/2">1/2</option>
+            <option value="1">1 bar</option>
+          </select>
+          <select id="delayFeel">
+            <option value="straight" selected>Straight</option>
+            <option value="dotted">Dotted</option>
+            <option value="triplet">Triplet</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">WET</div>
+        <div class="full-label">Delay dry/wet</div>
+        <input id="delayWet" type="range" min="0" max="1" step="0.001" value="0.15" />
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">FDBK</div>
+        <div class="full-label">Delay feedback</div>
+        <input id="delayFb" type="range" min="0" max="0.95" step="0.001" value="0.35" />
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">SYNC</div>
+        <div class="full-label">MIDI sync mode</div>
+        <select id="syncMode">
+          <option value="internal" selected>Internal</option>
+          <option value="midi-master">MIDI master</option>
+          <option value="midi-slave">MIDI slave</option>
+        </select>
+      </div>
+
+      <div class="ctrl small" id="midiOutCtrl">
+        <div class="abbr">M.OUT</div>
+        <div class="full-label">MIDI output</div>
+        <select id="midiOut"></select>
+      </div>
+
+      <div class="ctrl small" id="midiInCtrl">
+        <div class="abbr">M.IN</div>
+        <div class="full-label">MIDI input</div>
+        <select id="midiIn"></select>
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">HELP</div>
+        <div class="full-label">Show labels overlay</div>
+        <button id="helpBtn" class="tinybtn">?</button>
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">RUN</div>
+        <div class="full-label">Transport</div>
+        <div class="btnrow">
+          <button id="startBtn" class="btn-primary">Start</button>
+          <button id="stopBtn" class="btn-danger">Stop</button>
+        </div>
+      </div>
+
+      <div class="ctrl small">
+        <div class="abbr">STAT</div>
+        <div class="full-label">Status</div>
+        <div class="pill" id="statusPill">Stopped</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  // ---------------------------
+  // Assumptions (because prompts are never ambiguous, right?)
+  // - Lane "width" spreads the 4 cascaded bandpass center frequencies around the main freq.
+  // - "48 dB-ish" slope is approximated by cascading 4 bandpass biquads.
+  // - Step editor (decay/prob/ratchet/last/accent) is shown when a step is selected (matches your sketch).
+  // ---------------------------
+
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b-a)*t;
+  const nowMs = () => performance.now();
+  const $ = (sel) => document.querySelector(sel);
+
+  const toastEl = $("#toast");
+  let toastT = null;
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toastEl.classList.remove("show"), 1800);
+  }
+
+  // ---------- State ----------
+  const DEFAULT = {
+    tempo: 120,
+    masterVol: 0.8,
+    accentAmt: 0.35,
+    delay: { div:"1/4", feel:"straight", wet:0.15, fb:0.35 },
+    syncMode: "internal",
+    midi: { outId: null, inId: null },
+    lanes: Array.from({length:6}).map((_, i) => ({
+      name: `Lane ${i+1}`,
+      division: "1/16",       // step advance rate for this lane
+      level: 0.9,
+      pan: 0.0,
+      f: 800 + i*260,
+      q: 8.0,
+      width: 0.25,           // 0..1 spread
+      decayMax: 0.20,        // seconds, base decay for lane; steps scale it down
+      steps: Array.from({length:16}).map(() => ({
+        on:false,
+        decay:1.0,            // multiplier 0.05..1
+        prob:1.0,             // 0..1
+        rat:1,                // 1..4
+        last:false,
+        acc:false
+      })),
+      selectedStep: 0
+    }))
+  };
+
+  function loadState(){
+    try{
+      const raw = localStorage.getItem("noise-drum-state-v1");
+      if(!raw) return structuredClone(DEFAULT);
+      const s = JSON.parse(raw);
+      // very light validation / merge
+      const out = structuredClone(DEFAULT);
+      if(typeof s.tempo === "number") out.tempo = clamp(s.tempo, 20, 300);
+      if(typeof s.masterVol === "number") out.masterVol = clamp(s.masterVol, 0, 1);
+      if(typeof s.accentAmt === "number") out.accentAmt = clamp(s.accentAmt, 0, 1);
+      if(s.delay){
+        out.delay.div = s.delay.div || out.delay.div;
+        out.delay.feel = s.delay.feel || out.delay.feel;
+        if(typeof s.delay.wet === "number") out.delay.wet = clamp(s.delay.wet, 0, 1);
+        if(typeof s.delay.fb === "number") out.delay.fb = clamp(s.delay.fb, 0, .95);
+      }
+      out.syncMode = s.syncMode || out.syncMode;
+      if(s.midi){
+        out.midi.outId = s.midi.outId ?? out.midi.outId;
+        out.midi.inId  = s.midi.inId  ?? out.midi.inId;
+      }
+      if(Array.isArray(s.lanes) && s.lanes.length === 6){
+        out.lanes = out.lanes.map((lane, i) => {
+          const l = s.lanes[i] || {};
+          lane.division = l.division || lane.division;
+          if(typeof l.level === "number") lane.level = clamp(l.level, 0, 1);
+          if(typeof l.pan === "number") lane.pan = clamp(l.pan, -1, 1);
+          if(typeof l.f === "number") lane.f = clamp(l.f, 50, 14000);
+          if(typeof l.q === "number") lane.q = clamp(l.q, 0.3, 30);
+          if(typeof l.width === "number") lane.width = clamp(l.width, 0, 1);
+          if(typeof l.decayMax === "number") lane.decayMax = clamp(l.decayMax, 0.02, 2.0);
+          if(typeof l.selectedStep === "number") lane.selectedStep = clamp(l.selectedStep|0, 0, 15);
+          if(Array.isArray(l.steps) && l.steps.length === 16){
+            lane.steps = lane.steps.map((st, j) => {
+              const x = l.steps[j] || {};
+              st.on = !!x.on;
+              if(typeof x.decay === "number") st.decay = clamp(x.decay, 0.05, 1);
+              if(typeof x.prob === "number") st.prob = clamp(x.prob, 0, 1);
+              if(typeof x.rat === "number") st.rat = clamp(x.rat|0, 1, 4);
+              st.last = !!x.last;
+              st.acc = !!x.acc;
+              return st;
+            });
+          }
+          // ensure only one last step per lane
+          normalizeLast(i, lane);
+          return lane;
+        });
+      }
+      return out;
+    }catch(e){
+      console.warn(e);
+      return structuredClone(DEFAULT);
+    }
+  }
+
+  function saveState(){
+    try{
+      localStorage.setItem("noise-drum-state-v1", JSON.stringify(state));
+    }catch(e){}
+  }
+
+  let state = loadState();
+
+  // ---------- UI Build ----------
+  const app = $("#app");
+
+  function buildUI(){
+    app.innerHTML = "";
+    state.lanes.forEach((lane, i) => {
+      app.appendChild(makeLane(i, lane));
+    });
+
+    // footer note
+    const note = document.createElement("div");
+    note.className = "footer-note";
+    note.innerHTML = `
+      <div class="panel">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:6px;">Notes</div>
+        <div style="font-size:12px;line-height:1.45;color:var(--muted);">
+          <ul style="margin:8px 0 0 18px;padding:0;">
+            <li>Click a step to toggle on/off. Shift-click a step to select it without toggling.</li>
+            <li>Click a step again to select it (or use Shift-click), then edit decay / probability / ratchet / last / accent below.</li>
+            <li>Stop resets all lane positions to step 1 (index 0) as requested.</li>
+            <li>Delay feedback is bandpass-filtered and softclipped so it behaves (mostly) like a civilized delay.</li>
+          </ul>
+        </div>
+      </div>
+    `;
+    app.appendChild(note);
+  }
+
+  function makeCtrl(labelAbbr, labelFull, inputEl){
+    const wrap = document.createElement("div");
+    wrap.className = "ctrl";
+    const ab = document.createElement("div");
+    ab.className = "abbr";
+    ab.textContent = labelAbbr;
+    const fl = document.createElement("div");
+    fl.className = "full-label";
+    fl.textContent = labelFull;
+    wrap.appendChild(ab); wrap.appendChild(fl); wrap.appendChild(inputEl);
+    return wrap;
+  }
+
+  function makeLane(idx, lane){
+    const laneEl = document.createElement("section");
+    laneEl.className = "lane";
+    laneEl.dataset.lane = idx;
+
+    // head
+    const head = document.createElement("div");
+    head.className = "lane-head";
+
+    const title = document.createElement("div");
+    title.className = "lane-title";
+    title.innerHTML = `
+      <div class="lane-num">${idx+1}</div>
+      <div>
+        <div class="name">${lane.name}</div>
+        <div class="pill" id="lanePos${idx}">step 1</div>
+      </div>
+    `;
+
+    const cwrap = document.createElement("div");
+    cwrap.className = "lane-controls";
+
+    // division
+    const divSel = document.createElement("select");
+    divSel.innerHTML = `
+      <option value="1/32">1/32</option>
+      <option value="1/16">1/16</option>
+      <option value="1/8">1/8</option>
+      <option value="1/4">1/4</option>
+    `;
+    divSel.value = lane.division;
+    divSel.addEventListener("change", () => {
+      lane.division = divSel.value;
+      saveState();
+    });
+
+    // level
+    const lvl = document.createElement("input");
+    lvl.type = "range"; lvl.min="0"; lvl.max="1"; lvl.step="0.001"; lvl.value = lane.level;
+    lvl.addEventListener("input", () => {
+      lane.level = +lvl.value;
+      if(audio.ready) audio.setLaneLevel(idx, lane.level);
+      saveState();
+    });
+
+    // pan
+    const pan = document.createElement("input");
+    pan.type="range"; pan.min="-1"; pan.max="1"; pan.step="0.001"; pan.value = lane.pan;
+    pan.addEventListener("input", () => {
+      lane.pan = +pan.value;
+      if(audio.ready) audio.setLanePan(idx, lane.pan);
+      saveState();
+    });
+
+    // filter freq
+    const f = document.createElement("input");
+    f.type="range"; f.min="50"; f.max="14000"; f.step="1"; f.value = lane.f;
+    f.addEventListener("input", () => {
+      lane.f = +f.value;
+      if(audio.ready) audio.setLaneFilter(idx, lane.f, lane.q, lane.width);
+      saveState();
+    });
+
+    // filter Q
+    const q = document.createElement("input");
+    q.type="range"; q.min="0.3"; q.max="30"; q.step="0.01"; q.value = lane.q;
+    q.addEventListener("input", () => {
+      lane.q = +q.value;
+      if(audio.ready) audio.setLaneFilter(idx, lane.f, lane.q, lane.width);
+      saveState();
+    });
+
+    // width
+    const w = document.createElement("input");
+    w.type="range"; w.min="0"; w.max="1"; w.step="0.001"; w.value = lane.width;
+    w.addEventListener("input", () => {
+      lane.width = +w.value;
+      if(audio.ready) audio.setLaneFilter(idx, lane.f, lane.q, lane.width);
+      saveState();
+    });
+
+    // decay max
+    const d = document.createElement("input");
+    d.type="range"; d.min="0.02"; d.max="2.0"; d.step="0.001"; d.value = lane.decayMax;
+    d.addEventListener("input", () => {
+      lane.decayMax = +d.value;
+      saveState();
+    });
+
+    cwrap.appendChild(makeCtrl("DIV","Division (step rate)", divSel));
+    cwrap.appendChild(makeCtrl("LVL","Lane level", lvl));
+    cwrap.appendChild(makeCtrl("PAN","Lane pan", pan));
+    cwrap.appendChild(makeCtrl("F","Filter frequency", f));
+    cwrap.appendChild(makeCtrl("Q","Filter resonance (Q)", q));
+    cwrap.appendChild(makeCtrl("W","Filter width (spread)", w));
+    cwrap.appendChild(makeCtrl("D","Decay max (seconds)", d));
+
+    head.appendChild(title);
+    head.appendChild(cwrap);
+    laneEl.appendChild(head);
+
+    // sequencer
+    const seqWrap = document.createElement("div");
+    seqWrap.className = "seq-wrap";
+    const seq = document.createElement("div");
+    seq.className = "seq";
+    seq.id = `seq${idx}`;
+
+    lane.steps.forEach((st, si) => {
+      const b = document.createElement("div");
+      b.className = "step" + (st.on ? " on" : "");
+      b.dataset.step = si;
+      b.title = `Step ${si+1}`;
+      b.innerHTML = `
+        <div class="dots">
+          <span class="dot ${st.acc ? "accent" : ""}"></span>
+          <span class="dot ${st.last ? "last" : ""}"></span>
+        </div>
+        ${si+1}
+      `;
+      b.addEventListener("click", (e) => {
+        const shift = e.shiftKey;
+        if(!shift){
+          st.on = !st.on;
+          b.classList.toggle("on", st.on);
+          saveState();
+        }
+        // select
+        setSelectedStep(idx, si);
+      });
+      b.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        setSelectedStep(idx, si);
+      });
+
+      seq.appendChild(b);
+    });
+
+    seqWrap.appendChild(seq);
+    laneEl.appendChild(seqWrap);
+
+    // editor
+    const editor = document.createElement("div");
+    editor.className = "editor";
+    editor.id = `editor${idx}`;
+
+    const edTop = document.createElement("div");
+    edTop.className = "editor-top";
+    const edTitle = document.createElement("div");
+    edTitle.className = "editor-title";
+    edTitle.id = `edTitle${idx}`;
+    edTitle.textContent = `Selected step: ${lane.selectedStep+1}`;
+    const onBtn = document.createElement("button");
+    onBtn.className = "tinybtn";
+    onBtn.id = `edOn${idx}`;
+    onBtn.textContent = "On";
+    const lastBtn = document.createElement("button");
+    lastBtn.className = "tinybtn";
+    lastBtn.id = `edLast${idx}`;
+    lastBtn.textContent = "Last";
+    const accBtn = document.createElement("button");
+    accBtn.className = "tinybtn";
+    accBtn.id = `edAcc${idx}`;
+    accBtn.textContent = "Accent";
+
+    edTop.appendChild(edTitle);
+    edTop.appendChild(onBtn);
+    edTop.appendChild(lastBtn);
+    edTop.appendChild(accBtn);
+
+    const edCtrls = document.createElement("div");
+    edCtrls.className = "editor-ctrls";
+
+    const decay = document.createElement("input");
+    decay.type="range"; decay.min="0.05"; decay.max="1"; decay.step="0.001";
+    const prob = document.createElement("input");
+    prob.type="range"; prob.min="0"; prob.max="1"; prob.step="0.001";
+    const rat = document.createElement("input");
+    rat.type="range"; rat.min="1"; rat.max="4"; rat.step="1";
+
+    const decayWrap = makeCtrl("DEC","Step decay scale", decay);
+    const probWrap = makeCtrl("PROB","Step probability", prob);
+    const ratWrap = makeCtrl("RAT","Ratchet (hits per step)", rat);
+
+    edCtrls.appendChild(decayWrap);
+    edCtrls.appendChild(probWrap);
+    edCtrls.appendChild(ratWrap);
+
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.innerHTML = `
+      <span class="abbr">TIP</span><span class="full-label">Tip</span>:
+      set <b>Last</b> to shorten the loop for this lane. Only one “last” step is allowed per lane.
+    `;
+
+    editor.appendChild(edTop);
+    editor.appendChild(edCtrls);
+    editor.appendChild(hint);
+
+    laneEl.appendChild(editor);
+
+    // wire editor
+    function syncEditor(){
+      const si = lane.selectedStep|0;
+      const st = lane.steps[si];
+      edTitle.textContent = `Selected step: ${si+1}`;
+      onBtn.classList.toggle("on", st.on);
+      onBtn.classList.toggle("btn-on", st.on);
+      lastBtn.classList.toggle("laston", st.last);
+      accBtn.classList.toggle("on", st.acc);
+
+      decay.value = st.decay;
+      prob.value = st.prob;
+      rat.value = st.rat;
+
+      // mark selected in UI
+      const seqEl = laneEl.querySelector(".seq");
+      [...seqEl.children].forEach((el, j) => el.classList.toggle("selected", j===si));
+    }
+
+    onBtn.addEventListener("click", () => {
+      const si = lane.selectedStep|0;
+      lane.steps[si].on = !lane.steps[si].on;
+      updateStepVisual(idx, si);
+      syncEditor();
+      saveState();
+    });
+
+    accBtn.addEventListener("click", () => {
+      const si = lane.selectedStep|0;
+      lane.steps[si].acc = !lane.steps[si].acc;
+      updateStepVisual(idx, si);
+      syncEditor();
+      saveState();
+    });
+
+    lastBtn.addEventListener("click", () => {
+      const si = lane.selectedStep|0;
+      // only one last per lane
+      lane.steps.forEach((x, j) => x.last = (j===si) ? !x.last : false);
+      normalizeLast(idx, lane);
+      updateLaneStepDots(idx);
+      syncEditor();
+      saveState();
+    });
+
+    decay.addEventListener("input", () => {
+      const si = lane.selectedStep|0;
+      lane.steps[si].decay = +decay.value;
+      saveState();
+    });
+
+    prob.addEventListener("input", () => {
+      const si = lane.selectedStep|0;
+      lane.steps[si].prob = +prob.value;
+      saveState();
+    });
+
+    rat.addEventListener("input", () => {
+      const si = lane.selectedStep|0;
+      lane.steps[si].rat = +rat.value|0;
+      saveState();
+    });
+
+    // initial selection visuals
+    syncEditor();
+    return laneEl;
+  }
+
+  function setSelectedStep(laneIdx, stepIdx){
+    const lane = state.lanes[laneIdx];
+    lane.selectedStep = stepIdx|0;
+    const laneEl = document.querySelector(`.lane[data-lane="${laneIdx}"]`);
+    if(!laneEl) return;
+    const ed = laneEl.querySelector(".editor");
+    // sync editor controls
+    const edTitle = laneEl.querySelector(`#edTitle${laneIdx}`);
+    const onBtn = laneEl.querySelector(`#edOn${laneIdx}`);
+    const lastBtn = laneEl.querySelector(`#edLast${laneIdx}`);
+    const accBtn = laneEl.querySelector(`#edAcc${laneIdx}`);
+    const decay = ed.querySelector(`.editor-ctrls .ctrl:nth-child(1) input`);
+    const prob  = ed.querySelector(`.editor-ctrls .ctrl:nth-child(2) input`);
+    const rat   = ed.querySelector(`.editor-ctrls .ctrl:nth-child(3) input`);
+
+    const st = lane.steps[stepIdx];
+    edTitle.textContent = `Selected step: ${stepIdx+1}`;
+    onBtn.classList.toggle("on", st.on);
+    onBtn.classList.toggle("btn-on", st.on);
+    lastBtn.classList.toggle("laston", st.last);
+    accBtn.classList.toggle("on", st.acc);
+    decay.value = st.decay;
+    prob.value = st.prob;
+    rat.value = st.rat;
+
+    const seqEl = laneEl.querySelector(".seq");
+    [...seqEl.children].forEach((el, j) => el.classList.toggle("selected", j===stepIdx));
+
+    saveState();
+  }
+
+  function updateStepVisual(laneIdx, stepIdx){
+    const seq = document.getElementById(`seq${laneIdx}`);
+    if(!seq) return;
+    const el = seq.children[stepIdx];
+    const st = state.lanes[laneIdx].steps[stepIdx];
+    el.classList.toggle("on", st.on);
+    // dots
+    const dots = el.querySelectorAll(".dot");
+    if(dots.length >= 2){
+      dots[0].classList.toggle("accent", st.acc);
+      dots[1].classList.toggle("last", st.last);
+    }
+  }
+
+  function updateLaneStepDots(laneIdx){
+    for(let i=0;i<16;i++) updateStepVisual(laneIdx, i);
+  }
+
+  function normalizeLast(laneIdx, lane){
+    // if multiple "last" got in via state load, keep the last one
+    let last = -1;
+    lane.steps.forEach((s,i)=>{ if(s.last) last = i; });
+    lane.steps.forEach((s,i)=> s.last = (i===last));
+  }
+
+  buildUI();
+
+  // ---------- Master UI Wiring ----------
+  const tempo = $("#tempo");
+  const tempoNum = $("#tempoNum");
+  const masterVol = $("#masterVol");
+  const accentAmt = $("#accentAmt");
+  const delayDiv = $("#delayDiv");
+  const delayFeel = $("#delayFeel");
+  const delayWet = $("#delayWet");
+  const delayFb = $("#delayFb");
+  const startBtn = $("#startBtn");
+  const stopBtn = $("#stopBtn");
+  const helpBtn = $("#helpBtn");
+  const statusPill = $("#statusPill");
+  const syncMode = $("#syncMode");
+  const midiOutCtrl = $("#midiOutCtrl");
+  const midiInCtrl  = $("#midiInCtrl");
+  const midiOutSel = $("#midiOut");
+  const midiInSel  = $("#midiIn");
+
+  function setStatus(text, cls){
+    statusPill.textContent = text;
+    statusPill.style.borderColor = cls === "on" ? "rgba(99,230,190,.45)" :
+                                   cls === "warn" ? "rgba(255,212,59,.55)" :
+                                   "rgba(255,255,255,.10)";
+    statusPill.style.color = cls === "on" ? "rgba(231,234,240,.92)" :
+                            cls === "warn" ? "rgba(255,212,59,.95)" :
+                            "var(--muted)";
+  }
+
+  tempo.value = state.tempo;
+  tempoNum.value = state.tempo;
+  masterVol.value = state.masterVol;
+  accentAmt.value = state.accentAmt;
+  delayDiv.value = state.delay.div;
+  delayFeel.value = state.delay.feel;
+  delayWet.value = state.delay.wet;
+  delayFb.value = state.delay.fb;
+  syncMode.value = state.syncMode;
+
+  function updateDelayParams(){
+    state.delay.div = delayDiv.value;
+    state.delay.feel = delayFeel.value;
+    state.delay.wet = +delayWet.value;
+    state.delay.fb = +delayFb.value;
+    if(audio.ready) audio.setDelay(state.delay, state.tempo);
+    saveState();
+  }
+
+  tempo.addEventListener("input", () => {
+    state.tempo = +tempo.value;
+    tempoNum.value = state.tempo;
+    if(audio.ready) audio.setTempo(state.tempo);
+    updateDelayParams();
+    saveState();
+  });
+  tempoNum.addEventListener("change", () => {
+    state.tempo = clamp(+tempoNum.value, 20, 300);
+    tempo.value = state.tempo;
+    if(audio.ready) audio.setTempo(state.tempo);
+    updateDelayParams();
+    saveState();
+  });
+
+  masterVol.addEventListener("input", () => {
+    state.masterVol = +masterVol.value;
+    if(audio.ready) audio.setMasterVol(state.masterVol);
+    saveState();
+  });
+
+  accentAmt.addEventListener("input", () => {
+    state.accentAmt = +accentAmt.value;
+    if(audio.ready) audio.setAccent(state.accentAmt);
+    saveState();
+  });
+
+  delayDiv.addEventListener("change", updateDelayParams);
+  delayFeel.addEventListener("change", updateDelayParams);
+  delayWet.addEventListener("input", updateDelayParams);
+  delayFb.addEventListener("input", updateDelayParams);
+
+  helpBtn.addEventListener("click", () => {
+    document.body.classList.toggle("help-on");
+    helpBtn.classList.toggle("btn-on");
+  });
+
+  // ---------- Audio Engine ----------
+  const audio = (() => {
+    let ctx = null;
+    let noiseSrc = null;
+    let noiseGain = null;
+
+    // per lane
+    const lanes = []; // { filters:[], envGain, levelGain, panner }
+
+    // master
+    let masterGain = null;
+    let mix = null;
+    let dry = null;
+    let wet = null;
+    let delay = null;
+    let fbGain = null;
+    let fbFilter = null;
+    let clip = null;
+
+    let ready = false;
+
+    function ensureCtx(){
+      if(ctx) return ctx;
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:"interactive" });
+      return ctx;
+    }
+
+    function makeNoiseBuffer(context, seconds=2){
+      const rate = context.sampleRate;
+      const len = Math.floor(seconds * rate);
+      const buf = context.createBuffer(1, len, rate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<len;i++) data[i] = (Math.random()*2-1);
+      return buf;
+    }
+
+    function softClipper(context){
+      const ws = context.createWaveShaper();
+      const n = 2048;
+      const curve = new Float32Array(n);
+      for(let i=0;i<n;i++){
+        const x = (i/(n-1))*2 - 1;
+        // gentle arctan-ish soft clip
+        curve[i] = Math.tanh(2.2*x) / Math.tanh(2.2);
+      }
+      ws.curve = curve;
+      ws.oversample = "2x";
+      return ws;
+    }
+
+    function initFromState(){
+      const context = ensureCtx();
+
+      // master routing:
+      // noise -> lanes -> mix -> [dry -> masterGain] + [wet delay -> masterGain] -> destination
+      mix = context.createGain();
+      dry = context.createGain();
+      wet = context.createGain();
+      masterGain = context.createGain();
+
+      delay = context.createDelay(4.0);
+      fbGain = context.createGain();
+      fbFilter = context.createBiquadFilter();
+      fbFilter.type = "bandpass";
+      fbFilter.frequency.value = 1200;
+      fbFilter.Q.value = 0.7;
+      clip = softClipper(context);
+
+      mix.connect(dry);
+      mix.connect(delay);
+
+      delay.connect(wet);
+
+      // feedback loop: delay -> filter -> softclip -> fbGain -> delay
+      delay.connect(fbFilter);
+      fbFilter.connect(clip);
+      clip.connect(fbGain);
+      fbGain.connect(delay);
+
+      // dry/wet mix to master
+      dry.connect(masterGain);
+      wet.connect(masterGain);
+      masterGain.connect(context.destination);
+
+      // noise source
+      noiseGain = context.createGain();
+      noiseGain.gain.value = 0.7;
+      noiseSrc = context.createBufferSource();
+      noiseSrc.buffer = makeNoiseBuffer(context, 2.5);
+      noiseSrc.loop = true;
+      noiseSrc.connect(noiseGain);
+
+      // lanes
+      lanes.length = 0;
+      for(let i=0;i<6;i++){
+        const laneState = state.lanes[i];
+        const filters = [];
+        for(let k=0;k<4;k++){
+          const bp = context.createBiquadFilter();
+          bp.type = "bandpass";
+          bp.Q.value = laneState.q;
+          bp.frequency.value = laneState.f;
+          filters.push(bp);
+        }
+        const envGain = context.createGain();
+        envGain.gain.value = 0.0;
+
+        const levelGain = context.createGain();
+        levelGain.gain.value = laneState.level;
+
+        const panner = context.createStereoPanner();
+        panner.pan.value = laneState.pan;
+
+        // chain: noiseGain -> bp1 -> bp2 -> bp3 -> bp4 -> envGain -> level -> pan -> mix
+        noiseGain.connect(filters[0]);
+        filters[0].connect(filters[1]);
+        filters[1].connect(filters[2]);
+        filters[2].connect(filters[3]);
+        filters[3].connect(envGain);
+        envGain.connect(levelGain);
+        levelGain.connect(panner);
+        panner.connect(mix);
+
+        lanes.push({filters, envGain, levelGain, panner});
+        setLaneFilter(i, laneState.f, laneState.q, laneState.width);
+      }
+
+      // apply master params
+      setMasterVol(state.masterVol);
+      setDelay(state.delay, state.tempo);
+
+      // start noise
+      noiseSrc.start();
+
+      ready = true;
+      return true;
+    }
+
+    function setMasterVol(v){
+      if(!ready) return;
+      masterGain.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
+    }
+
+    function setLaneLevel(i, v){
+      if(!ready) return;
+      lanes[i].levelGain.gain.setTargetAtTime(v, ctx.currentTime, 0.01);
+    }
+
+    function setLanePan(i, v){
+      if(!ready) return;
+      lanes[i].panner.pan.setTargetAtTime(v, ctx.currentTime, 0.01);
+    }
+
+    function setLaneFilter(i, freq, q, width){
+      if(!ready) return;
+      const chain = lanes[i].filters;
+      const spread = width * 0.22; // 0..22% around center
+      const offsets = [-1.0, -0.33, 0.33, 1.0].map(x => x * spread);
+      for(let k=0;k<4;k++){
+        const f = clamp(freq * (1 + offsets[k]), 40, 18000);
+        chain[k].frequency.setTargetAtTime(f, ctx.currentTime, 0.01);
+        chain[k].Q.setTargetAtTime(q, ctx.currentTime, 0.01);
+      }
+    }
+
+    function setDelay(d, bpm){
+      if(!ready) return;
+      // compute delay time from bpm & division
+      const quarter = 60 / bpm; // seconds
+      let base = quarter;
+      switch(d.div){
+        case "1/16": base = quarter/4; break;
+        case "1/8":  base = quarter/2; break;
+        case "1/4":  base = quarter; break;
+        case "1/2":  base = quarter*2; break;
+        case "1":    base = quarter*4; break; // bar (4/4)
+      }
+      let factor = 1;
+      if(d.feel === "dotted") factor = 1.5;
+      else if(d.feel === "triplet") factor = 2/3;
+
+      const t = clamp(base * factor, 0.01, 3.9);
+      delay.delayTime.setTargetAtTime(t, ctx.currentTime, 0.01);
+
+      dry.gain.setTargetAtTime(1 - d.wet, ctx.currentTime, 0.01);
+      wet.gain.setTargetAtTime(d.wet, ctx.currentTime, 0.01);
+      fbGain.gain.setTargetAtTime(d.fb, ctx.currentTime, 0.02);
+    }
+
+    function setTempo(bpm){
+      // nothing to do directly, scheduler uses bpm
+      // delay uses bpm via setDelay called outside
+    }
+
+    function setAccent(v){
+      // stored in state; applied at trigger time
+    }
+
+    function triggerLane(laneIndex, time, amp=1.0, decayTime=0.15){
+      if(!ready) return;
+      const g = lanes[laneIndex].envGain.gain;
+      // quick attack, exponential-ish decay
+      const t0 = time;
+      const attack = 0.002;
+      const floor = 0.0008;
+      // cancel potential previous ramps around that time
+      g.cancelScheduledValues(t0);
+      g.setValueAtTime(0.0, t0);
+      g.linearRampToValueAtTime(amp, t0 + attack);
+      // expo ramp needs positive values
+      g.exponentialRampToValueAtTime(floor, t0 + attack + decayTime);
+      g.setValueAtTime(0.0, t0 + attack + decayTime + 0.01);
+    }
+
+    function suspendOrResume(){
+      if(!ctx) return;
+      if(ctx.state === "suspended") ctx.resume();
+    }
+
+    function panicSilence(){
+      if(!ready) return;
+      const t = ctx.currentTime;
+      lanes.forEach(l => {
+        l.envGain.gain.cancelScheduledValues(t);
+        l.envGain.gain.setValueAtTime(0.0, t);
+      });
+    }
+
+    return {
+      get ctx(){ return ctx; },
+      get ready(){ return ready; },
+      initFromState,
+      setMasterVol,
+      setLaneLevel,
+      setLanePan,
+      setLaneFilter,
+      setDelay,
+      setTempo,
+      setAccent,
+      triggerLane,
+      suspendOrResume,
+      panicSilence
+    };
+  })();
+
+  // ---------- Sequencer / Transport ----------
+  let playing = false;
+  const seq = {
+    lookahead: 0.025,          // seconds (setInterval)
+    scheduleAhead: 0.12,       // seconds
+    timer: null,
+    lanePos: Array(6).fill(0),
+    laneNextTime: Array(6).fill(0),
+    startTime: 0
+  };
+
+  function stepSecondsForDivision(division, bpm){
+    const quarter = 60 / bpm;
+    switch(division){
+      case "1/32": return quarter / 8;
+      case "1/16": return quarter / 4;
+      case "1/8":  return quarter / 2;
+      case "1/4":  return quarter;
+      default: return quarter/4;
+    }
+  }
+
+  function laneLoopLength(lane){
+    const idx = lane.steps.findIndex(s => s.last);
+    return idx >= 0 ? (idx + 1) : 16;
+  }
+
+  function resetPositions(){
+    for(let i=0;i<6;i++){
+      seq.lanePos[i] = 0;
+      seq.laneNextTime[i] = audio.ctx ? audio.ctx.currentTime : 0;
+      updateLaneCursor(i);
+      updateLanePosPill(i);
+    }
+  }
+
+  function updateLanePosPill(i){
+    const el = document.getElementById(`lanePos${i}`);
+    if(!el) return;
+    el.textContent = `step ${seq.lanePos[i]+1}`;
+  }
+
+  function clearAllCursors(){
+    for(let li=0;li<6;li++){
+      const s = document.getElementById(`seq${li}`);
+      if(!s) continue;
+      [...s.children].forEach(el => el.classList.remove("cursor"));
+    }
+  }
+
+  function updateLaneCursor(laneIndex){
+    const s = document.getElementById(`seq${laneIndex}`);
+    if(!s) return;
+    const pos = seq.lanePos[laneIndex] | 0;
+    [...s.children].forEach((el, j) => el.classList.toggle("cursor", j===pos));
+  }
+
+  function blinkHit(laneIndex, stepIndex){
+    const s = document.getElementById(`seq${laneIndex}`);
+    if(!s) return;
+    const el = s.children[stepIndex];
+    el.classList.remove("hit");
+    // force reflow to restart animation
+    void el.offsetWidth;
+    el.classList.add("hit");
+  }
+
+  function scheduleLaneStep(laneIndex, time){
+    const lane = state.lanes[laneIndex];
+    const stepIndex = seq.lanePos[laneIndex] | 0;
+    const st = lane.steps[stepIndex];
+    const bpm = state.tempo;
+    const stepDur = stepSecondsForDivision(lane.division, bpm);
+    const baseDecay = lane.decayMax;
+
+    // Visual cursor update happens near schedule time (we do it here)
+    // It's UI, so it's imperfect anyway.
+    setTimeout(() => {
+      if(playing){
+        updateLaneCursor(laneIndex);
+        updateLanePosPill(laneIndex);
+      }
+    }, Math.max(0, (time - audio.ctx.currentTime)*1000 - 10));
+
+    if(st.on){
+      const roll = Math.random();
+      if(roll <= st.prob){
+        const rat = clamp(st.rat|0, 1, 4);
+        const decayT = clamp(baseDecay * st.decay, 0.01, 3.0);
+
+        for(let r=0;r<rat;r++){
+          const t = time + (r * (stepDur/rat));
+          const isAcc = st.acc;
+          const accBoost = 1 + (isAcc ? (state.accentAmt * 0.9) : 0);
+          const amp = clamp(0.9 * accBoost, 0, 1.35);
+
+          audio.triggerLane(laneIndex, t, amp, decayT);
+
+          setTimeout(() => {
+            if(playing) blinkHit(laneIndex, stepIndex);
+          }, Math.max(0, (t - audio.ctx.currentTime)*1000));
+        }
+      }
+    }
+
+    // advance position
+    const loopLen = laneLoopLength(lane);
+    let nextPos = stepIndex + 1;
+    if(nextPos >= loopLen) nextPos = 0;
+    seq.lanePos[laneIndex] = nextPos;
+    seq.laneNextTime[laneIndex] += stepDur;
+  }
+
+  function schedulerTick(){
+    if(!playing || !audio.ready) return;
+    const ct = audio.ctx.currentTime;
+    for(let i=0;i<6;i++){
+      while(seq.laneNextTime[i] < ct + seq.scheduleAhead){
+        scheduleLaneStep(i, seq.laneNextTime[i]);
+      }
+    }
+  }
+
+  function startInternal(){
+    if(playing) return;
+    if(!audio.ready){
+      audio.initFromState();
+      // apply lane params
+      state.lanes.forEach((l, i) => {
+        audio.setLaneLevel(i, l.level);
+        audio.setLanePan(i, l.pan);
+        audio.setLaneFilter(i, l.f, l.q, l.width);
+      });
+    }
+    audio.suspendOrResume();
+    playing = true;
+    setStatus("Running", "on");
+    clearAllCursors();
+
+    const t = audio.ctx.currentTime + 0.05;
+    for(let i=0;i<6;i++){
+      seq.lanePos[i] = 0;
+      seq.laneNextTime[i] = t;
+      updateLaneCursor(i);
+      updateLanePosPill(i);
+    }
+    seq.timer = setInterval(schedulerTick, seq.lookahead*1000);
+  }
+
+  function stopAll(){
+    if(!playing) return;
+    playing = false;
+    setStatus("Stopped", "");
+    clearInterval(seq.timer);
+    seq.timer = null;
+    audio.panicSilence();
+    resetPositions();
+    clearAllCursors();
+  }
+
+  // ---------- MIDI Sync ----------
+  let midiAccess = null;
+  let midiIn = null;
+  let midiOut = null;
+
+  // master clock sending
+  let midiClockRunning = false;
+  let midiClockTimer = null;
+  let nextClockAt = 0;
+
+  // slave clock receive
+  let lastClockMs = 0;
+  let bpmEst = state.tempo;
+  let tickCount = 0;
+  let slaveRunning = false;
+
+  function supportsMIDI(){
+    return !!navigator.requestMIDIAccess;
+  }
+
+  async function initMIDI(){
+    if(!supportsMIDI()){
+      toast("Web MIDI not supported in this browser.");
+      midiOutCtrl.classList.add("disabled");
+      midiInCtrl.classList.add("disabled");
+      return;
+    }
+    try{
+      midiAccess = await navigator.requestMIDIAccess({sysex:false});
+      refreshMIDIPorts();
+      midiAccess.onstatechange = refreshMIDIPorts;
+    }catch(e){
+      console.warn(e);
+      toast("MIDI access denied.");
+      midiOutCtrl.classList.add("disabled");
+      midiInCtrl.classList.add("disabled");
+    }
+  }
+
+  function refreshMIDIPorts(){
+    if(!midiAccess) return;
+    const outs = [...midiAccess.outputs.values()];
+    const ins  = [...midiAccess.inputs.values()];
+
+    midiOutSel.innerHTML = "";
+    midiInSel.innerHTML = "";
+
+    outs.forEach(o => {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = o.name || o.manufacturer || o.id;
+      midiOutSel.appendChild(opt);
+    });
+
+    ins.forEach(i => {
+      const opt = document.createElement("option");
+      opt.value = i.id;
+      opt.textContent = i.name || i.manufacturer || i.id;
+      midiInSel.appendChild(opt);
+    });
+
+    if(outs.length === 0){
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No outputs";
+      midiOutSel.appendChild(opt);
+    }
+    if(ins.length === 0){
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No inputs";
+      midiInSel.appendChild(opt);
+    }
+
+    // restore selection if possible
+    if(state.midi.outId && outs.some(o => o.id === state.midi.outId)) midiOutSel.value = state.midi.outId;
+    if(state.midi.inId  && ins.some(i => i.id === state.midi.inId))  midiInSel.value = state.midi.inId;
+
+    selectMIDIPorts();
+  }
+
+  function selectMIDIPorts(){
+    if(!midiAccess) return;
+
+    if(midiOut){
+      try{ midiOut.close?.(); }catch(e){}
+    }
+    midiOut = null;
+
+    if(midiIn){
+      midiIn.onmidimessage = null;
+      try{ midiIn.close?.(); }catch(e){}
+    }
+    midiIn = null;
+
+    const outId = midiOutSel.value;
+    const inId  = midiInSel.value;
+
+    if(outId && midiAccess.outputs.has(outId)){
+      midiOut = midiAccess.outputs.get(outId);
+      state.midi.outId = outId;
+    }
+
+    if(inId && midiAccess.inputs.has(inId)){
+      midiIn = midiAccess.inputs.get(inId);
+      midiIn.onmidimessage = onMIDIMessage;
+      state.midi.inId = inId;
+    }
+    saveState();
+  }
+
+  midiOutSel.addEventListener("change", selectMIDIPorts);
+  midiInSel.addEventListener("change", selectMIDIPorts);
+
+  function sendMIDI(bytes){
+    if(!midiOut) return;
+    try{ midiOut.send(bytes); }catch(e){}
+  }
+
+  function startMIDIClockSender(){
+    if(!midiOut){ toast("Select a MIDI output first."); return; }
+    midiClockRunning = true;
+    nextClockAt = nowMs();
+    const tickMs = (60*1000)/(state.tempo*24);
+    sendMIDI([0xFA]); // Start
+    function loop(){
+      if(!midiClockRunning) return;
+      const t = nowMs();
+      if(t >= nextClockAt){
+        sendMIDI([0xF8]);
+        nextClockAt += tickMs;
+      }
+      midiClockTimer = setTimeout(loop, 1);
+    }
+    loop();
+  }
+
+  function stopMIDIClockSender(){
+    if(!midiClockRunning) return;
+    midiClockRunning = false;
+    clearTimeout(midiClockTimer);
+    midiClockTimer = null;
+    sendMIDI([0xFC]); // Stop
+  }
+
+  function onMIDIMessage(e){
+    const [status] = e.data;
+    const t = nowMs();
+
+    if(status === 0xFA){ // Start
+      slaveRunning = true;
+      tickCount = 0;
+      lastClockMs = 0;
+      // start audio if not started
+      if(!audio.ready) audio.initFromState();
+      audio.suspendOrResume();
+      // reset positions
+      playing = true; // used for UI
+      setStatus("MIDI Slave", "warn");
+      clearAllCursors();
+      const at = audio.ctx.currentTime + 0.02;
+      for(let i=0;i<6;i++){
+        seq.lanePos[i] = 0;
+        seq.laneNextTime[i] = at;
+        updateLaneCursor(i);
+        updateLanePosPill(i);
+      }
+      return;
+    }
+    if(status === 0xFC){ // Stop
+      slaveRunning = false;
+      stopAll();
+      return;
+    }
+    if(status === 0xF8){ // Clock tick
+      if(!slaveRunning) return;
+      if(lastClockMs){
+        const dt = (t - lastClockMs) / 1000;
+        const instBpm = 60 / (dt * 24);
+        if(isFinite(instBpm)){
+          bpmEst = lerp(bpmEst, instBpm, 0.12);
+          bpmEst = clamp(bpmEst, 20, 300);
+        }
+      }
+      lastClockMs = t;
+      tickCount++;
+
+      // advance lanes on their tick boundaries
+      const ticksPer = {
+        "1/32": 3,
+        "1/16": 6,
+        "1/8": 12,
+        "1/4": 24
+      };
+
+      const audioNow = audio.ctx.currentTime;
+      for(let li=0; li<6; li++){
+        const div = state.lanes[li].division;
+        const n = ticksPer[div] || 6;
+        if(tickCount % n === 0){
+          // compute step duration from bpmEst
+          const stepDur = stepSecondsForDivision(div, bpmEst);
+          // schedule a step at audioNow (tiny offset)
+          const schedTime = audioNow + 0.002;
+          // schedule using same logic, but temporarily override state.tempo for decay timing etc
+          const savedTempo = state.tempo;
+          state.tempo = bpmEst;
+          scheduleLaneStep(li, schedTime);
+          state.tempo = savedTempo;
+
+          // also keep nextTime consistent for UI (not used heavily in slave)
+          seq.laneNextTime[li] = schedTime + stepDur;
+        }
+      }
+    }
+  }
+
+  // ---------- Sync mode toggle ----------
+  function applySyncMode(){
+    state.syncMode = syncMode.value;
+    saveState();
+
+    midiOutCtrl.style.display = (state.syncMode === "midi-master") ? "" : "none";
+    midiInCtrl.style.display  = (state.syncMode === "midi-slave")  ? "" : "none";
+
+    if(state.syncMode === "internal"){
+      setStatus(playing ? "Running" : "Stopped", playing ? "on" : "");
+      stopMIDIClockSender();
+      slaveRunning = false;
+    }else if(state.syncMode === "midi-master"){
+      setStatus(playing ? "MIDI Master" : "Stopped", playing ? "warn" : "");
+      slaveRunning = false;
+    }else if(state.syncMode === "midi-slave"){
+      setStatus("Waiting MIDI", "warn");
+      stopMIDIClockSender();
+    }
+  }
+  syncMode.addEventListener("change", applySyncMode);
+
+  // init midi
+  initMIDI().then(() => {
+    applySyncMode();
+  });
+
+  // ---------- Transport buttons ----------
+  startBtn.addEventListener("click", async () => {
+    if(!audio.ready) audio.initFromState();
+    audio.suspendOrResume();
+
+    if(state.syncMode === "internal"){
+      startInternal();
+    }else if(state.syncMode === "midi-master"){
+      startInternal();
+      startMIDIClockSender();
+      setStatus("MIDI Master", "warn");
+    }else if(state.syncMode === "midi-slave"){
+      // in slave mode, Start is just "arm audio"; real start comes from MIDI Start
+      if(!supportsMIDI()){
+        toast("No Web MIDI support.");
+        return;
+      }
+      if(!midiIn){
+        toast("Select a MIDI input.");
+        return;
+      }
+      playing = false;
+      slaveRunning = false;
+      resetPositions();
+      clearAllCursors();
+      setStatus("Waiting MIDI", "warn");
+      toast("Waiting for MIDI Start…");
+    }
+  });
+
+  stopBtn.addEventListener("click", () => {
+    if(state.syncMode === "midi-master") stopMIDIClockSender();
+    stopAll();
+    if(state.syncMode === "midi-slave"){
+      // in slave mode, this is a local stop (doesn't send MIDI)
+      slaveRunning = false;
+      setStatus("Stopped", "");
+    }
+  });
+
+  // ---------- Initial apply of audio params (for UI) ----------
+  // Don't init audio until user hits start (autoplay policies), but keep UI synced.
+  applySyncMode();
+  setStatus("Stopped", "");
+
+})();
+</script>
+</body>
+</html>
